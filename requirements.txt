@@ -28,3 +28,5 @@ SQLAlchemy
 aiohttp
 tenacity
 dataclasses-json
+gunicorn
+eventlet
