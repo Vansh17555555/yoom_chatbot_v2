@@ -3,7 +3,17 @@ services:
     name: flask-zoom-app
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m eventlet -w 1 app:app
+    startCommand: python app.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_S3_BUCKET_NAME
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: ASSEMBLYAI_API_KEY
+        sync: false
