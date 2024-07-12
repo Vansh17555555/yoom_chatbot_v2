@@ -191,4 +191,4 @@ def chat():
         return jsonify({"reply": "An error occurred while processing your question. Please try again."})
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    socketio.run(app, debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
