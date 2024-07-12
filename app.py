@@ -3,7 +3,7 @@ import requests
 import tempfile
 import time
 from flask import Flask, request, jsonify, render_template
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -14,12 +14,18 @@ from langchain.prompts import PromptTemplate
 import logging
 from requests.exceptions import RequestException
 import boto3
-
+import eventlet
+eventlet.monkey_patch()
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# AWS configuration
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_S3_BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME")
+AWS_S3_BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME", "audiobucket12345")
 
 s3 = boto3.client('s3',
                   aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -29,13 +35,10 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
 transcript_text = ''
 vector_store = None
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001",
-                                          google_api_key="AIzaSyCd-T6r9WRlvXExVzTDimaGrKFNnNv5Kqw")
+                                          google_api_key=os.getenv("GOOGLE_API_KEY"))
 
 @app.route('/')
 def index():
@@ -137,6 +140,7 @@ def handle_audio_data(data):
 @app.route('/upload_audio', methods=['POST'])
 def upload_audio():
     if 'audio' not in request.files:
+        logger.error("No audio file provided in the request")
         return jsonify({"error": "No audio file provided"}), 400
 
     audio_file = request.files['audio']
@@ -144,17 +148,20 @@ def upload_audio():
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
             audio_file.save(temp_file.name)
+            logger.info(f"Temporary audio file saved: {temp_file.name}")
 
             s3.upload_file(temp_file.name, AWS_S3_BUCKET_NAME, os.path.basename(temp_file.name))
+            logger.info(f"Audio file uploaded to S3 bucket: {AWS_S3_BUCKET_NAME}")
 
         audio_url = s3.generate_presigned_url('get_object',
                                               Params={'Bucket': AWS_S3_BUCKET_NAME,
                                                       'Key': os.path.basename(temp_file.name)},
                                               ExpiresIn=3600)
+        logger.info(f"Presigned URL generated for audio file")
 
         return jsonify({"audio_url": audio_url})
     except Exception as e:
-        logger.error(f"Error handling audio upload: {str(e)}")
+        logger.error(f"Error handling audio upload: {str(e)}", exc_info=True)
         return jsonify({"error": "An error occurred while processing the audio"}), 500
 
 @app.route('/end_meeting', methods=['POST'])
@@ -165,7 +172,7 @@ def end_meeting():
             vector_store.save_local("faiss_index")
             logger.info("Vector store saved to disk.")
         except Exception as e:
-            logger.error(f"Error saving vector store: {str(e)}")
+            logger.error(f"Error saving vector store: {str(e)}", exc_info=True)
             return jsonify({"status": "error", "message": "Failed to save meeting data."}), 500
     return jsonify({"status": "success", "message": "Meeting ended and vector store saved."})
 
@@ -190,5 +197,5 @@ def chat():
         logger.error(f"Error in chat function: {str(e)}")
         return jsonify({"reply": "An error occurred while processing your question. Please try again."})
 
-if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+if __name__ == "__main__":
+    socketio.run(app, debug=True, use_reloader=False)
