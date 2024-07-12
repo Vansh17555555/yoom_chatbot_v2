@@ -7,9 +7,8 @@ from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.embeddings import GoogleGenerativeAIEmbeddings
-from langchain.llms import GoogleGenerativeAI
+from langchain_community.vectorstores import FAISS
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 import logging
@@ -37,17 +36,14 @@ vector_store = None
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001",
                                           google_api_key="AIzaSyCd-T6r9WRlvXExVzTDimaGrKFNnNv5Kqw")
 
-
 @app.route('/')
 def index():
     return render_template('index.html')
-
 
 def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_text(text)
     return chunks
-
 
 def update_vector_store(new_text):
     global vector_store
@@ -62,7 +58,6 @@ def update_vector_store(new_text):
         vector_store.add_texts(chunks)
 
     logger.info("Vector store updated with new text chunks.")
-
 
 def get_conversational_chain():
     prompt_template = """
@@ -82,7 +77,6 @@ def get_conversational_chain():
     prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
     return chain
-
 
 @socketio.on('audio_data')
 def handle_audio_data(data):
@@ -139,7 +133,6 @@ def handle_audio_data(data):
     except IOError as e:
         logger.error(f"Error writing transcription to file: {str(e)}")
 
-
 @app.route('/upload_audio', methods=['POST'])
 def upload_audio():
     if 'audio' not in request.files:
@@ -163,7 +156,6 @@ def upload_audio():
         logger.error(f"Error handling audio upload: {str(e)}")
         return jsonify({"error": "An error occurred while processing the audio"}), 500
 
-
 @app.route('/end_meeting', methods=['POST'])
 def end_meeting():
     global vector_store
@@ -175,7 +167,6 @@ def end_meeting():
             logger.error(f"Error saving vector store: {str(e)}")
             return jsonify({"status": "error", "message": "Failed to save meeting data."}), 500
     return jsonify({"status": "success", "message": "Meeting ended and vector store saved."})
-
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -197,7 +188,6 @@ def chat():
     except Exception as e:
         logger.error(f"Error in chat function: {str(e)}")
         return jsonify({"reply": "An error occurred while processing your question. Please try again."})
-
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
