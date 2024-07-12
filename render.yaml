@@ -6,4 +6,4 @@ services:
     startCommand: gunicorn --worker-class eventlet -w 1 app:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.3
+        value: 3.11.0
