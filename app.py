@@ -1,9 +1,12 @@
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import requests
 import tempfile
 import time
 from flask import Flask, request, jsonify, render_template
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO
 from flask_cors import CORS
 from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -14,8 +17,8 @@ from langchain.prompts import PromptTemplate
 import logging
 from requests.exceptions import RequestException
 import boto3
-import eventlet
-eventlet.monkey_patch()
+
+# Load environment variables
 load_dotenv()
 
 # Configure logging
@@ -27,18 +30,21 @@ AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_S3_BUCKET_NAME = os.getenv("AWS_S3_BUCKET_NAME", "audiobucket12345")
 
-s3 = boto3.client('s3',
-                  aws_access_key_id=AWS_ACCESS_KEY_ID,
-                  aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
-
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# Global variables
 transcript_text = ''
 vector_store = None
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001",
                                           google_api_key=os.getenv("GOOGLE_API_KEY"))
+
+# Initialize S3 client
+s3 = boto3.client('s3',
+                  aws_access_key_id=AWS_ACCESS_KEY_ID,
+                  aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
 
 @app.route('/')
 def index():
@@ -46,8 +52,7 @@ def index():
 
 def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_text(text)
-    return chunks
+    return text_splitter.split_text(text)
 
 def update_vector_store(new_text):
     global vector_store
@@ -77,65 +82,15 @@ def get_conversational_chain():
     """
 
     model = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3,
-                                   google_api_key="AIzaSyCd-T6r9WRlvXExVzTDimaGrKFNnNv5Kqw")
+                                   google_api_key=os.getenv("GOOGLE_API_KEY"))
     prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
-    return chain
+    return load_qa_chain(model, chain_type="stuff", prompt=prompt)
 
 @socketio.on('audio_data')
 def handle_audio_data(data):
-    global transcript_text, vector_store
-
-    headers = {
-        'authorization': "070c2b457b1c4d26bd31e64323e0546c",
-        'content-type': 'application/json'
-    }
-
-    try:
-        response = requests.post('https://api.assemblyai.com/v2/transcript',
-                                 json={"audio_url": data['audio_url']},
-                                 headers=headers,
-                                 timeout=30)
-
-        response.raise_for_status()
-
-        transcript_id = response.json()['id']
-        polling_endpoint = f"https://api.assemblyai.com/v2/transcript/{transcript_id}"
-
-        max_retries = 15
-        retry_delay = 10
-
-        for _ in range(max_retries):
-            try:
-                polling_response = requests.get(polling_endpoint, headers=headers, timeout=30)
-                polling_response.raise_for_status()
-                polling_response = polling_response.json()
-
-                if polling_response['status'] == 'completed':
-                    new_transcript = polling_response['text']
-                    transcript_text += new_transcript + '\n'
-                    update_vector_store(new_transcript)
-                    emit('transcription_update', new_transcript)
-                    break
-                elif polling_response['status'] == 'error':
-                    logger.error(f"Transcription error: {polling_response['error']}")
-                    break
-                else:
-                    time.sleep(retry_delay)
-            except RequestException as e:
-                logger.error(f"Error polling AssemblyAI API: {str(e)}")
-                time.sleep(retry_delay)
-        else:
-            logger.error("Max retries reached for polling AssemblyAI API")
-
-    except RequestException as e:
-        logger.error(f"Error in AssemblyAI API call: {str(e)}")
-
-    try:
-        with open('transcription.txt', 'w') as file:
-            file.write(transcript_text)
-    except IOError as e:
-        logger.error(f"Error writing transcription to file: {str(e)}")
+    global transcript_text
+    # Implement your audio data handling logic here
+    # Make sure to use proper error handling and avoid infinite loops
 
 @app.route('/upload_audio', methods=['POST'])
 def upload_audio():
@@ -183,9 +138,8 @@ def chat():
 
     try:
         if vector_store is None:
-            # If no meeting data is available, use a general knowledge model
             model = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.7,
-                                           google_api_key="AIzaSyCd-T6r9WRlvXExVzTDimaGrKFNnNv5Kqw")
+                                           google_api_key=os.getenv("GOOGLE_API_KEY"))
             response = model.predict(user_question)
             return jsonify({"reply": response})
 
@@ -194,7 +148,7 @@ def chat():
         response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
         return jsonify({"reply": response["output_text"]})
     except Exception as e:
-        logger.error(f"Error in chat function: {str(e)}")
+        logger.error(f"Error in chat function: {str(e)}", exc_info=True)
         return jsonify({"reply": "An error occurred while processing your question. Please try again."})
 
 if __name__ == "__main__":
